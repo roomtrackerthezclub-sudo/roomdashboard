@@ -1,0 +1,199 @@
+<div style="background:hotpink;color:black;padding:10px;font-weight:bold;text-align:center;">
+  VERSION TEST — if you can’t see this, you are not loading the new file
+</div>
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Room Dashboard</title>
+
+  <!-- If your device has no internet, this will NOT load. -->
+  <!-- <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script> -->
+  <style>
+    body{font-family:Arial;background:#1f1f1f;color:white;margin:0;padding:20px;}
+    h1{text-align:center;margin:0 0 10px}
+    #diag{max-width:1100px;margin:10px auto 16px auto;padding:10px 12px;border-radius:10px;white-space:pre-wrap;display:none;}
+    .ok{background:#064e3b;}
+    .bad{background:#7f1d1d;}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:10px;}
+    .room{height:80px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:bold;cursor:pointer;user-select:none;}
+    .clean{background:#2ecc71}
+    .dirty{background:#e74c3c}
+    .inprocess{background:#f1c40f;color:black}
+    .donotrent{background:black}
+    .occupied{background:#3498db}
+    .overtime{background:purple}
+    #statusPanel{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#333;padding:15px;border-radius:10px;display:none;box-shadow:0 10px 30px rgba(0,0,0,.35);}
+    #selectedRoomText{margin-bottom:10px;font-weight:bold;text-align:center;}
+    button{padding:8px 10px;cursor:pointer;border:none;border-radius:8px;margin:3px;}
+  </style>
+</head>
+<body>
+  <h1>Room Dashboard</h1>
+  <div id="diag"></div>
+
+  <div class="grid" id="roomGrid"></div>
+
+  <div id="statusPanel">
+    <div id="selectedRoomText"></div>
+    <button onclick="setStatus('clean')">Clean</button>
+    <button onclick="setStatus('dirty')">Dirty</button>
+    <button onclick="setStatus('inprocess')">In Process</button>
+    <button onclick="setStatus('donotrent')">Do Not Rent</button>
+    <button onclick="setStatus('occupied')">Occupied</button>
+    <button onclick="closePanel()">Cancel</button>
+  </div>
+
+<script>
+/* ========= DIAGNOSTIC UI ========= */
+const diag = document.getElementById("diag");
+function showDiag(ok, msg){
+  diag.className = ok ? "ok" : "bad";
+  diag.style.display = "block";
+  diag.textContent = msg;
+}
+
+/* ========= ROOM LIST ========= */
+const roomNumbers = [
+  208,209,210,211,213,220,231,232,241,242,243,
+  251,252,253,254,270,271,272,274,280,281,282,
+  283,290,291,292,293,300,301,302,310,320,330,
+  340,351,353,354,371,372,380,390,391,393,394,
+  395,396,397,398
+];
+
+const grid = document.getElementById("roomGrid");
+const panel = document.getElementById("statusPanel");
+let selectedRoom = null;
+let rooms = {}; // local cache
+
+function createRoomsUI(){
+  grid.innerHTML = "";
+  roomNumbers.forEach(num=>{
+    const div = document.createElement("div");
+    div.className = "room clean";
+    div.dataset.room = num;
+    div.textContent = num;
+    div.onclick = () => openPanel(num);
+    grid.appendChild(div);
+  });
+}
+
+function renderRooms(){
+  document.querySelectorAll(".room").forEach(div=>{
+    const num = div.dataset.room;
+    const data = rooms[num];
+    if(!data) return;
+    div.className = "room " + (data.status || "clean");
+  });
+}
+
+/* ========= PANEL ========= */
+function openPanel(roomNumber){
+  selectedRoom = roomNumber;
+  document.getElementById("selectedRoomText").innerText = "Room " + roomNumber;
+  panel.style.display = "block";
+}
+function closePanel(){
+  panel.style.display = "none";
+  selectedRoom = null;
+}
+
+/* ========= SUPABASE SETUP =========
+   IMPORTANT: use the Project API "anon public" key (often starts with eyJ...)
+================================== */
+const SUPABASE_URL = "https://kukioqqipniiwsahwdll.supabase.co";
+const SUPABASE_ANON_KEY = "PASTE_YOUR_ANON_PUBLIC_KEY_HERE"; // <-- REQUIRED
+
+let supabase = null;
+
+function initSupabase(){
+  // 1) CDN loaded?
+  if(!window.supabase){
+    showDiag(false,
+      "Supabase JS library did NOT load.\n" +
+      "- Are you opening this on a machine with no internet?\n" +
+      "- Is the CDN blocked?\n\n" +
+      "Fix: host supabase-js locally or ensure internet access."
+    );
+    return false;
+  }
+
+  // 2) Key pasted?
+  if(!SUPABASE_ANON_KEY || SUPABASE_ANON_KEY.includes("PASTE_YOUR_ANON_PUBLIC_KEY_HERE")){
+    showDiag(false,
+      "You did not paste your Supabase ANON PUBLIC key.\n" +
+      "That sb_publishable_... key is NOT the anon key for supabase-js.\n\n" +
+      "Fix: Supabase Project Settings → API → 'anon public' key (usually starts with eyJ...)."
+    );
+    return false;
+  }
+
+  supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  showDiag(true, "UI loaded. Supabase client initialized. Loading rooms…");
+  return true;
+}
+
+async function loadRoomsFromDB(){
+  const { data, error } = await supabase.from("rooms").select("*");
+  if(error){
+    showDiag(false,
+      "Supabase query failed.\n\n" +
+      "Most likely: RLS is ON and anon users cannot read 'rooms'.\n" +
+      "Or table name/columns don’t match.\n\n" +
+      "Supabase error: " + error.message
+    );
+    return;
+  }
+
+  rooms = {};
+  data.forEach(r => rooms[r.room_number] = r);
+  renderRooms();
+  showDiag(true, "Rooms loaded: " + data.length);
+}
+
+async function setStatus(newStatus){
+  if(!selectedRoom) return;
+
+  // If supabase isn’t available, just close panel (so kiosk still “works” visually)
+  if(!supabase){
+    closePanel();
+    return;
+  }
+
+  const oldStatus = rooms[selectedRoom]?.status || null;
+
+  const { error: updateError } = await supabase.from("rooms")
+    .update({ status: newStatus, updated_at: new Date().toISOString() })
+    .eq("room_number", selectedRoom);
+
+  if(updateError){
+    showDiag(false, "Update failed: " + updateError.message);
+    return;
+  }
+
+  // optional log table (won’t block if missing)
+  await supabase.from("room_logs").insert({
+    room_number: selectedRoom,
+    action: "status_change",
+    old_status: oldStatus,
+    new_status: newStatus
+  }).catch(()=>{});
+
+  closePanel();
+  await loadRoomsFromDB();
+}
+
+/* ========= INIT ========= */
+createRoomsUI();              // ALWAYS renders the grid no matter what
+const ok = initSupabase();    // DIAG will tell you what broke
+if(ok){
+  loadRoomsFromDB();
+  supabase.channel("room-sync")
+    .on("postgres_changes",{event:"*",schema:"public",table:"rooms"},()=>loadRoomsFromDB())
+    .subscribe();
+}
+</script>
+</body>
+</html>
